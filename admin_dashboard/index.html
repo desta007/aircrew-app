@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AirCrew — Admin Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-badge">✈</div>
+        <div class="brand-text">AIR<span>CREW</span><small>Mobility Platform</small></div>
+      </div>
+      <nav class="menu" id="menu">
+        <a data-view="dashboard" class="active"><i>▦</i> Dashboard</a>
+        <a data-view="order"><i>🧾</i> Order</a>
+        <a data-view="driver"><i>🚗</i> Driver</a>
+        <a data-view="customer"><i>🧑‍✈️</i> AirCrew / Customer</a>
+        <a data-view="area"><i>🗺️</i> Area</a>
+        <a data-view="keuangan"><i>💰</i> Keuangan</a>
+        <a data-view="withdrawal"><i>🏦</i> Withdrawal</a>
+        <a data-view="laporan"><i>📊</i> Laporan</a>
+        <a data-view="pengaturan"><i>⚙️</i> Pengaturan</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="foot-card">
+          <strong>Support 24/7</strong>
+          <span>Tim siap membantu operasional area.</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <header class="topbar">
+        <button class="hamburger" id="hamburger">☰</button>
+        <div class="page-title" id="pageTitle">Dashboard Monitoring Area</div>
+        <div class="topbar-right">
+          <div class="search"><input placeholder="Cari order, driver, crew..." /></div>
+          <div class="live"><span class="dot"></span> Real-time • diperbarui 1 menit</div>
+          <div id="sourceBadge" class="src-badge">● memuat data…</div>
+          <div class="admin"><div class="admin-av">AD</div><div class="admin-meta"><b>Admin Pusat</b><span>Kantor Pusat</span></div></div>
+        </div>
+      </header>
+
+      <main class="content" id="content"><!-- views injected here --></main>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
