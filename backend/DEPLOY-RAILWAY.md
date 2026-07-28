@@ -39,8 +39,10 @@ Build memakai `backend/Dockerfile` (sudah disediakan) sehingga hasilnya determin
 
 ## 3. Environment Variables
 
-Buka service backend → tab **Variables** → tambahkan (nilai DB memakai *variable
-reference* ke service Postgres):
+Buka service backend → tab **Variables** → tambahkan berikut.
+
+**Cara koneksi DB yang disarankan: satu variabel `DB_URL`** (paling anti-gagal —
+tidak bergantung pada nama variabel per-field yang rawan salah ketik):
 
 ```bash
 APP_NAME=AirCrew
@@ -52,6 +54,27 @@ APP_URL=https://<domain-railway-anda>.up.railway.app
 LOG_CHANNEL=stderr  # log tampil di Railway Deploy Logs
 
 DB_CONNECTION=pgsql
+DB_URL=${{Postgres.DATABASE_URL}}
+```
+
+`DATABASE_URL` disediakan otomatis oleh service Postgres (format
+`postgresql://user:pass@host:port/db`). Laravel mem-parsing-nya dan otomatis
+mengisi host/port/database/user/password — mengabaikan `DB_HOST` dkk.
+
+> **PENTING soal nama service:** `${{Postgres.DATABASE_URL}}` mereferensikan
+> service database bernama **`Postgres`**. Bila service database Anda bernama lain
+> (lihat di sidebar Railway), ganti `Postgres` sesuai nama itu — mis.
+> `${{postgres.DATABASE_URL}}` atau `${{railway-db.DATABASE_URL}}`. Referensi yang
+> salah nama membuat variabel kosong → Laravel jatuh ke default `127.0.0.1`
+> (lihat bagian **Troubleshooting**).
+
+### Alternatif: variabel per-field
+
+Bila lebih suka eksplisit, ganti `DB_URL` dengan lima variabel ini (semua
+memakai reference ke service Postgres — sesuaikan nama `Postgres`):
+
+```bash
+DB_CONNECTION=pgsql
 DB_HOST=${{Postgres.PGHOST}}
 DB_PORT=${{Postgres.PGPORT}}
 DB_DATABASE=${{Postgres.PGDATABASE}}
@@ -59,9 +82,9 @@ DB_USERNAME=${{Postgres.PGUSER}}
 DB_PASSWORD=${{Postgres.PGPASSWORD}}
 ```
 
-> Sintaks `${{Postgres.PGHOST}}` adalah *reference* Railway — sesuaikan `Postgres`
-> bila nama service database Anda berbeda. Koneksi lewat jaringan privat Railway,
-> jadi `DB_SSLMODE` default (`prefer`) sudah aman.
+> Jangan campur keduanya. `DB_URL` menang bila keduanya ada. Koneksi lewat jaringan
+> privat Railway, jadi `DB_SSLMODE` default (`prefer`) sudah aman.
+> **Jangan** set `DB_PORT=5433` (itu port lokal Anda) — biarkan dari reference.
 
 ### 3a. APP_KEY
 
@@ -157,6 +180,39 @@ Atau ubah saat runtime lewat menu **Pengaturan API** di app (fitur `reconnect`).
 - **Log**: `LOG_CHANNEL=stderr` menampilkan log Laravel langsung di Railway Logs.
 - **Storage**: filesystem Railway *ephemeral* (hilang saat redeploy). PDF bukti
   transaksi di app dibuat di sisi Flutter, jadi tidak terpengaruh.
+
+---
+
+## Troubleshooting
+
+### `SQLSTATE[08006] connection to server at "127.0.0.1", port 5433 failed: Connection refused`
+
+Laravel mencoba konek ke `127.0.0.1` (localhost container itu sendiri), bukan ke
+service Postgres. Artinya **variabel koneksi DB tidak terbaca** dan Laravel jatuh
+ke nilai default/lokal. Penyebab & solusi:
+
+1. **Variabel DB belum di-set / referensi salah nama service.** Buka service backend
+   → **Variables** → pastikan ada `DB_CONNECTION=pgsql` dan `DB_URL=${{Postgres.DATABASE_URL}}`
+   (atau lima variabel per-field). Cek nama service database di sidebar — reference
+   harus persis (`${{<NamaService>.DATABASE_URL}}`). Setelah diubah, Railway otomatis
+   redeploy.
+2. **Masih ada `DB_HOST`/`DB_PORT` lama.** Hapus `DB_HOST=127.0.0.1` atau
+   `DB_PORT=5433` yang mungkin ter-copy dari `.env` lokal. Nilai ini menimpa koneksi.
+3. **Database dan backend beda project.** `DATABASE_URL` privat hanya bisa diakses
+   dalam project yang sama. Pastikan Postgres dan backend berada di **satu project**.
+   Bila terpaksa lintas project, pakai `${{Postgres.DATABASE_PUBLIC_URL}}`.
+4. **Verifikasi cepat** dari Shell service backend:
+   ```bash
+   php artisan tinker --execute="echo config('database.connections.pgsql.host');"
+   # harus menampilkan host Railway (mis. *.railway.internal), BUKAN 127.0.0.1
+   ```
+
+Setelah host benar, migrasi (yang jalan otomatis saat start) akan berhasil.
+
+### `No application encryption key has been specified`
+
+`APP_KEY` belum di-set. Lihat langkah 3a — generate `php artisan key:generate --show`
+lalu tempel ke variable `APP_KEY`.
 
 ---
 

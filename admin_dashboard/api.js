@@ -1,7 +1,7 @@
 // AirCrew Admin — API loader.
 // Tries the Laravel API; on any failure the dashboard falls back to the
 // static demo data in data.js so it always renders.
-const API_BASE = (localStorage.getItem('aircrew_api') || 'http://127.0.0.1:8000/api');
+const API_BASE = (localStorage.getItem('aircrew_api') || 'https://aircrew-app-production.up.railway.app/api');
 
 const SERVICE_LABEL = {
   scheduled: 'Jemputan Terjadwal', rental3: 'Rental 3 Jam', rental5: 'Rental 5 Jam', rental8: 'Rental 8 Jam',
