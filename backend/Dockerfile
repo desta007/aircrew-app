@@ -22,8 +22,9 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction \
 ENV PORT=8000
 EXPOSE 8000
 
-# Run pending migrations (idempotent, non-destructive) then start the app.
-# Seed the demo data once from the Railway service shell (see DEPLOY-RAILWAY.md).
-CMD php artisan migrate --force \
-    && php artisan config:clear \
+# Clear any stale config cache FIRST (so runtime Railway env vars are used, not a
+# baked-in snapshot), run pending migrations, then start the app. Seed the demo
+# data once from the Railway service shell (see DEPLOY-RAILWAY.md).
+CMD php artisan config:clear \
+    && php artisan migrate --force \
     && php artisan serve --host 0.0.0.0 --port "${PORT}"

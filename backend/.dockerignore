@@ -1,6 +1,8 @@
 vendor/
 node_modules/
 .env
+.env.*
+bootstrap/cache/*.php
 .git/
 storage/logs/*
 storage/framework/cache/*
