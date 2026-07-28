@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required so the release build can reach the AirCrew API over the network.
+         (The debug/profile manifests declare this automatically; the release
+         build uses THIS manifest, so it must be declared here too.) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="aircrew_app"
         android:name="${applicationName}"
