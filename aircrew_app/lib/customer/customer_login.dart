@@ -21,15 +21,36 @@ class _CustomerLoginState extends State<CustomerLogin> {
   Future<void> _login() async {
     setState(() => _loading = true);
     final app = context.read<AppState>();
-    final ok = await app.loginCustomer(_id.text.trim(), _pw.text);
+    final result = await app.loginCustomer(_id.text.trim(), _pw.text);
     if (!mounted) return;
     setState(() => _loading = false);
-    if (ok) {
+    switch (result) {
+      case LoginResult.success:
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CustomerShell()));
+      case LoginResult.invalidCredentials:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Email atau password salah.'), backgroundColor: AirColors.red),
+        );
+      case LoginResult.offline:
+        _offerDemo();
+    }
+  }
+
+  Future<void> _offerDemo() async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Server tidak terjangkau'),
+        content: const Text('Tidak dapat terhubung ke server AirCrew. Periksa koneksi internet Anda, atau masuk mode demo dengan data contoh.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Mode Demo')),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      context.read<AppState>().enterDemoMode();
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CustomerShell()));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email atau password salah.'), backgroundColor: AirColors.red),
-      );
     }
   }
 

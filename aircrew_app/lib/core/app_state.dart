@@ -3,6 +3,13 @@ import 'api.dart';
 import 'models.dart';
 import 'seed.dart';
 
+/// Outcome of a login attempt.
+enum LoginResult {
+  success, // valid credentials, signed in against the API
+  invalidCredentials, // server rejected the email/password (401)
+  offline, // server unreachable — offer demo mode explicitly
+}
+
 /// Single in-memory store shared by the Mitra and Customer demo apps.
 ///
 /// On startup it tries to load everything from the Laravel API. If the backend
@@ -48,43 +55,68 @@ class AppState extends ChangeNotifier {
   Driver? loggedInDriver;
 
   /// Mitra (driver) login against the database → Sanctum token → load data.
-  /// Returns true on success; false only when the server rejects credentials.
-  /// Offline falls back to a demo session.
-  Future<bool> loginMitra(String email, String password) async {
+  ///
+  /// Distinguishes three outcomes so a wrong password is never silently
+  /// accepted: [LoginResult.success] (valid credentials),
+  /// [LoginResult.invalidCredentials] (server rejected — 401), and
+  /// [LoginResult.offline] (server unreachable — the UI can then offer demo
+  /// mode as an explicit choice rather than logging in with any password).
+  Future<LoginResult> loginMitra(String email, String password) async {
     try {
       loggedInDriver = await api.loginMitra(email, password);
-      apiConnected = true;
-      await _loadMitraData();
-      notifyListeners();
-      return true;
     } on ApiException catch (e) {
       debugPrint('loginMitra rejected: $e');
-      return false;
+      return LoginResult.invalidCredentials;
     } catch (e) {
-      debugPrint('loginMitra offline, demo mode: $e');
-      apiConnected = false;
-      notifyListeners();
-      return true;
+      debugPrint('loginMitra offline: $e');
+      return LoginResult.offline;
     }
+    // Credentials accepted; token is set. Load data best-effort — a transient
+    // failure here must not turn a valid login into a demo session.
+    apiConnected = true;
+    try {
+      await _loadMitraData();
+    } catch (e) {
+      debugPrint('loginMitra data load partial: $e');
+    }
+    notifyListeners();
+    return LoginResult.success;
   }
 
   /// Customer login against the database → Sanctum token → load invoices.
-  Future<bool> loginCustomer(String email, String password) async {
+  /// Same three-way outcome as [loginMitra].
+  Future<LoginResult> loginCustomer(String email, String password) async {
     try {
       loggedInCustomer = await api.loginCustomer(email, password);
-      apiConnected = true;
-      await _loadCustomerData();
-      notifyListeners();
-      return true;
     } on ApiException catch (e) {
       debugPrint('loginCustomer rejected: $e');
-      return false;
+      return LoginResult.invalidCredentials;
     } catch (e) {
-      debugPrint('loginCustomer offline, demo mode: $e');
-      apiConnected = false;
-      notifyListeners();
-      return true;
+      debugPrint('loginCustomer offline: $e');
+      return LoginResult.offline;
     }
+    apiConnected = true;
+    try {
+      await _loadCustomerData();
+    } catch (e) {
+      debugPrint('loginCustomer data load partial: $e');
+    }
+    notifyListeners();
+    return LoginResult.success;
+  }
+
+  /// Enter the offline demo session explicitly (user-chosen from the login
+  /// screen when the server is unreachable). Uses bundled seed data.
+  void enterDemoMode() {
+    apiConnected = false;
+    _apiSaldo = _apiHeld = _apiTotal = _apiHariIni = _apiMinggu = _apiBulan = null;
+    _active = null;
+    incoming = Seed.incomingOrder();
+    _orderHistory = Seed.history();
+    _wallet = Seed.walletHistory();
+    _withdrawals = Seed.withdrawals();
+    _invoices = Seed.invoices();
+    notifyListeners();
   }
 
   /// Revoke the token and reset to a clean (seed) state.

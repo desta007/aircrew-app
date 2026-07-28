@@ -57,11 +57,11 @@ class ApiClient {
     throw ApiException('GET $path -> ${res.statusCode}');
   }
 
-  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body, {Map<String, String>? query}) async {
+  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body, {Map<String, String>? query, Duration? overrideTimeout}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final res = await http
         .post(uri, headers: _headers(json: true), body: jsonEncode(body))
-        .timeout(timeout);
+        .timeout(overrideTimeout ?? timeout);
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
@@ -81,8 +81,12 @@ class ApiClient {
   }
 
   // ---------- Auth (against database, Sanctum token) ----------
+  // Auth uses a longer timeout: a free-tier server may cold-start on the first
+  // request and mobile networks are slower than the default poll timeout.
+  static const _authTimeout = Duration(seconds: 30);
+
   Future<Customer> loginCustomer(String email, String password) async {
-    final j = await _post('/auth/customer/login', {'email': email, 'password': password});
+    final j = await _post('/auth/customer/login', {'email': email, 'password': password}, overrideTimeout: _authTimeout);
     token = j['token'] as String?;
     final c = Customer.fromJson(j['customer'] as Map<String, dynamic>);
     currentCustomer = c.id;
@@ -90,7 +94,7 @@ class ApiClient {
   }
 
   Future<Driver> loginMitra(String email, String password) async {
-    final j = await _post('/auth/mitra/login', {'email': email, 'password': password});
+    final j = await _post('/auth/mitra/login', {'email': email, 'password': password}, overrideTimeout: _authTimeout);
     token = j['token'] as String?;
     final d = Driver.fromJson(j['driver'] as Map<String, dynamic>);
     currentDriver = d.id;
