@@ -311,7 +311,7 @@ class _MitraHomeState extends State<MitraHome> {
 
   Widget _statsRow(AppState app) {
     return Row(children: [
-      Expanded(child: _stat('Hari Ini', rp(app.pendapatanHariIni + 320000), Icons.today, AirColors.blue)),
+      Expanded(child: _stat('Hari Ini', rp(app.pendapatanHariIni), Icons.today, AirColors.blue)),
       const SizedBox(width: 12),
       Expanded(child: _stat('Rating', '${app.driver.rating}', Icons.star, AirColors.gold)),
     ]);

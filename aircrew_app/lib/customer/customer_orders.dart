@@ -8,13 +8,31 @@ import '../core/widgets.dart';
 import 'customer_order_flow.dart';
 
 /// Customer order history (Riwayat Order).
-class CustomerOrders extends StatelessWidget {
+class CustomerOrders extends StatefulWidget {
   const CustomerOrders({super.key});
+
+  @override
+  State<CustomerOrders> createState() => _CustomerOrdersState();
+}
+
+class _CustomerOrdersState extends State<CustomerOrders> {
+  @override
+  void initState() {
+    super.initState();
+    // Pull the latest order history (all statuses) when the tab opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppState>().refreshCustomerOrders();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final orders = app.invoices.map((i) => i.order).toList();
+    // Prefer the live server history (includes waiting/in-progress orders);
+    // fall back to invoice-derived orders when offline.
+    final orders = app.customerOrders.isNotEmpty
+        ? app.customerOrders
+        : app.invoices.map((i) => i.order).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Riwayat Order'), automaticallyImplyLeading: false),
       body: orders.isEmpty

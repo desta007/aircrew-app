@@ -26,8 +26,15 @@ class AppState extends ChangeNotifier {
 
   final ApiClient api = ApiClient.instance;
 
-  final Driver driver = Seed.me;
-  final Customer crew = Seed.crew;
+  /// The active driver identity shown across the Mitra app: the account signed
+  /// in against the API when available, otherwise the bundled demo driver. Using
+  /// a getter (instead of a fixed seed field) keeps the header, profile, and
+  /// order assignment consistent with whoever actually logged in.
+  Driver get driver => loggedInDriver ?? Seed.me;
+
+  /// The active crew identity shown across the Customer app (logged-in account
+  /// when available, else the demo crew). Drives the closed-area filtering.
+  Customer get crew => loggedInCustomer ?? Seed.crew;
 
   /// Whether the last bootstrap reached the Laravel API.
   bool apiConnected = false;
@@ -116,6 +123,7 @@ class AppState extends ChangeNotifier {
     _wallet = Seed.walletHistory();
     _withdrawals = Seed.withdrawals();
     _invoices = Seed.invoices();
+    _customerOrders = [];
     notifyListeners();
   }
 
@@ -131,6 +139,7 @@ class AppState extends ChangeNotifier {
     _wallet = Seed.walletHistory();
     _withdrawals = Seed.withdrawals();
     _invoices = Seed.invoices();
+    _customerOrders = [];
     notifyListeners();
   }
 
@@ -156,6 +165,24 @@ class AppState extends ChangeNotifier {
 
   Future<void> _loadCustomerData() async {
     _invoices = await api.customerInvoices();
+    try {
+      _customerOrders = await api.customerOrders();
+    } catch (e) {
+      debugPrint('loadCustomerOrders: $e');
+    }
+  }
+
+  /// Drivers available in the logged-in customer's area (closed-area system),
+  /// used by the "Pilih Driver & Unit" step. Empty when offline so the caller
+  /// can fall back to seed data.
+  Future<List<Driver>> areaDrivers() async {
+    if (!apiConnected) return [];
+    try {
+      return await api.customerDrivers();
+    } catch (e) {
+      debugPrint('areaDrivers: $e');
+      return [];
+    }
   }
 
   /// Create a WAITING customer order in the database and return it so the
@@ -180,6 +207,8 @@ class AppState extends ChangeNotifier {
         argo: argo,
         completed: false,
       );
+      // Refresh history so the new (waiting) order shows in Riwayat Order.
+      refreshCustomerOrders();
       return r.order;
     } catch (e) {
       debugPrint('createWaitingOrder: $e');
@@ -218,6 +247,8 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       debugPrint('refreshInvoices: $e');
     }
+    // Keep the order history in sync once the trip is completed.
+    refreshCustomerOrders();
   }
 
   /// Persist a completed customer order + its invoice directly (used by the
@@ -281,7 +312,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void acceptOrder() {
+  Future<void> acceptOrder() async {
     final o = incoming;
     if (o == null) return;
     o.status = OrderStatus.accepted;
@@ -289,7 +320,16 @@ class AppState extends ChangeNotifier {
     _active = o;
     incoming = null;
     notifyListeners();
-    if (apiConnected) api.acceptOrder(o.id).catchError((e) => o);
+    if (apiConnected) {
+      try {
+        // Adopt the server's authoritative order so the trip screen shows the
+        // real customer + the driver/unit actually assigned in the database.
+        _active = await api.acceptOrder(o.id);
+        notifyListeners();
+      } catch (e) {
+        debugPrint('acceptOrder: $e');
+      }
+    }
   }
 
   void rejectOrder() {
@@ -315,7 +355,7 @@ class AppState extends ChangeNotifier {
     if (o == null) return;
     o.charges = charges;
     o.status = OrderStatus.completed;
-    o.completedAt = DateTime(2026, 5, 18, 4, 10);
+    o.completedAt = Seed.now;
     _orderHistory = [o, ..._orderHistory];
     _wallet = [
       WalletTx(id: o.id, type: WalletTxType.income, amount: o.total, at: o.completedAt!, label: 'Pendapatan order'),
@@ -397,6 +437,22 @@ class AppState extends ChangeNotifier {
   // ---- Order history ----
   List<Order> _orderHistory = [];
   List<Order> get orderHistory => _orderHistory;
+
+  // ---- Customer order history (all statuses: waiting → … → completed) ----
+  List<Order> _customerOrders = [];
+  List<Order> get customerOrders => _customerOrders;
+
+  /// Reload the customer's full order history (called on login, after creating
+  /// an order, and once a trip completes so the list stays live).
+  Future<void> refreshCustomerOrders() async {
+    if (!apiConnected) return;
+    try {
+      _customerOrders = await api.customerOrders();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('refreshCustomerOrders: $e');
+    }
+  }
 
   // ---- Customer invoices ----
   List<Invoice> _invoices = [];

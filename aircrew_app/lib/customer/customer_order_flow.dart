@@ -41,6 +41,11 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
   Order? _lastOrder; // most recent snapshot from the poll
   Timer? _poll;
 
+  // Drivers in the customer's area (closed-area system). Loaded from the API
+  // when online; falls back to seed data filtered by the customer's area.
+  List<Driver> _areaDrivers = [];
+  bool _driversLoaded = false;
+
   double get _price => switch (_service) {
         ServiceType.scheduled => 125000,
         ServiceType.rental3 => 350000,
@@ -49,6 +54,26 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
       };
 
   bool get _accepted => _serverStatus != OrderStatus.waiting;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDrivers();
+  }
+
+  /// Load the drivers serving the customer's area (closed-area system).
+  Future<void> _loadDrivers() async {
+    final app = context.read<AppState>();
+    final fromApi = await app.areaDrivers();
+    if (!mounted) return;
+    setState(() {
+      _areaDrivers = fromApi.isNotEmpty
+          ? fromApi
+          : Seed.drivers.where((d) => d.area == app.crew.area).toList();
+      if (_areaDrivers.isEmpty) _areaDrivers = Seed.drivers.take(3).toList();
+      _driversLoaded = true;
+    });
+  }
 
   @override
   void dispose() {
@@ -199,8 +224,10 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
   // Step: pick driver + unit
   Widget _driverStep() {
     final app = context.read<AppState>();
-    final drivers = Seed.drivers.where((d) => d.area == app.crew.area).toList();
-    if (drivers.isEmpty) drivers.addAll(Seed.drivers.take(3));
+    if (!_driversLoaded) {
+      return const Center(child: CircularProgressIndicator(color: AirColors.navy));
+    }
+    final drivers = _areaDrivers;
     _driver ??= drivers.first;
     return Column(children: [
       Padding(

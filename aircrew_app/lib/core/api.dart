@@ -170,6 +170,13 @@ class ApiClient {
     return (j['drivers'] as List).map((d) => Driver.fromJson(d as Map<String, dynamic>)).toList();
   }
 
+  /// Full order history for the logged-in customer (all statuses), used by the
+  /// customer "Riwayat Order" screen.
+  Future<List<Order>> customerOrders() async {
+    final j = await _get('/customer/orders', query: _custQ);
+    return (j['orders'] as List).map((o) => Order.fromJson(o as Map<String, dynamic>)).toList();
+  }
+
   Future<Map<String, dynamic>> payInvoice(String code, double amount, PaymentMethod method) =>
       _post('/customer/invoices/$code/pay', {'amount': amount.toInt(), 'method': method.name}, query: _custQ);
 
