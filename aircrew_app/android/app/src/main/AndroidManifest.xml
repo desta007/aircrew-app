@@ -3,6 +3,9 @@
          (The debug/profile manifests declare this automatically; the release
          build uses THIS manifest, so it must be declared here too.) -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Phase 1 — device GPS for the driver location reporter & customer map picker. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <application
         android:label="aircrew_app"
         android:name="${applicationName}"

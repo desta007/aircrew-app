@@ -22,6 +22,8 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware('auth:sanctum')->prefix('mitra')->group(function () {
     Route::get('/me', [MitraController::class, 'me']);
     Route::post('/online', [MitraController::class, 'toggleOnline']);
+    Route::post('/location', [MitraController::class, 'updateLocation']);
+    Route::post('/device-token', [MitraController::class, 'registerDeviceToken']);
     Route::get('/incoming', [MitraController::class, 'incoming']);
     Route::post('/orders/{code}/accept', [MitraController::class, 'accept']);
     Route::post('/orders/{code}/reject', [MitraController::class, 'reject']);
@@ -38,7 +40,9 @@ Route::middleware('auth:sanctum')->prefix('mitra')->group(function () {
 Route::middleware('auth:sanctum')->prefix('customer')->group(function () {
     Route::get('/me', [CustomerController::class, 'me']);
     Route::get('/drivers', [CustomerController::class, 'drivers']);
+    Route::post('/orders/estimate', [CustomerController::class, 'estimate']);
     Route::post('/orders', [CustomerController::class, 'storeOrder']);
+    Route::post('/device-token', [CustomerController::class, 'registerDeviceToken']);
     Route::get('/orders', [CustomerController::class, 'orderHistory']);
     Route::get('/orders/{code}', [CustomerController::class, 'showOrder']);
     Route::post('/orders/{code}/rate', [CustomerController::class, 'rateOrder']);

@@ -40,6 +40,11 @@ dependencies:
   printing: ^5.13.3
   qr_flutter: ^4.1.0
   http: ^1.2.2
+  # Phase 1 — location foundation
+  flutter_map: ^7.0.2          # OpenStreetMap tiles (no API key)
+  latlong2: ^0.9.1             # LatLng type used by flutter_map
+  geolocator: ^13.0.1          # device GPS for the driver app
+  permission_handler: ^11.3.1  # runtime location permission
 
 dev_dependencies:
   flutter_test:

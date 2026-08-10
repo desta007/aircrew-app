@@ -7,6 +7,7 @@ import '../core/models.dart';
 import '../core/seed.dart';
 import '../core/theme.dart';
 import '../core/widgets.dart';
+import 'map_picker.dart';
 
 /// Full customer order flow (end-to-end, connected to the driver app):
 /// detail → pilih driver & unit → konfirmasi → order dibuat (waiting) →
@@ -27,11 +28,22 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
   late ServiceType _service = widget.initialService;
   final _pickup = TextEditingController(text: 'Hotel Novotel Bandara');
   final _dest = TextEditingController(text: 'Terminal 3 - CGK');
-  DateTime _schedule = DateTime(2026, 5, 18, 3, 45);
+  DateTime _schedule = _defaultSchedule();
+  // Default pickup time: next round hour from now, today.
+  static DateTime _defaultSchedule() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, now.hour + 1, 0);
+  }
   Driver? _driver;
   bool _favorite = true;
   int _rating = 5;
   final _comment = TextEditingController();
+
+  // Phase 1 — map-selected coordinates + live distance-based fare estimate.
+  LatLngPoint? _pickupPoint;
+  LatLngPoint? _destPoint;
+  FareEstimate? _estimate;
+  bool _estimating = false;
 
   // End-to-end (online) order tracking.
   String? _orderCode; // set when a real waiting order is created
@@ -46,14 +58,53 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
   List<Driver> _areaDrivers = [];
   bool _driversLoaded = false;
 
-  double get _price => switch (_service) {
+  /// Live distance-based estimate when both map points are picked; otherwise a
+  /// static per-service fallback (used offline or before points are chosen).
+  double get _price => _estimate?.fareEstimate ?? switch (_service) {
         ServiceType.scheduled => 125000,
         ServiceType.rental3 => 350000,
         ServiceType.rental5 => 550000,
         ServiceType.rental8 => 800000,
       };
 
-  bool get _accepted => _serverStatus != OrderStatus.waiting;
+  /// Open the map picker for pickup/destination, store the point, then refresh
+  /// the fare estimate once both ends are known.
+  Future<void> _pickOnMap({required bool isPickup}) async {
+    final picked = await MapLocationPicker.show(
+      context,
+      title: isPickup ? 'Pilih Titik Jemput' : 'Pilih Tujuan',
+      initial: isPickup ? _pickupPoint : _destPoint,
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (isPickup) {
+        _pickupPoint = picked;
+      } else {
+        _destPoint = picked;
+      }
+    });
+    await _refreshEstimate();
+  }
+
+  /// Recompute distance/ETA/fare from the backend when both points are set.
+  Future<void> _refreshEstimate() async {
+    final p = _pickupPoint, d = _destPoint;
+    if (p == null || d == null) return;
+    final app = context.read<AppState>();
+    setState(() => _estimating = true);
+    final est = await app.estimateFare(service: _service, pickup: p, destination: d);
+    if (!mounted) return;
+    setState(() {
+      _estimate = est;
+      _estimating = false;
+    });
+  }
+
+  // "Searching" covers waiting/offered/no-driver; a driver is truly assigned
+  // only once the order advances to accepted or beyond.
+  bool get _accepted => _serverStatus != OrderStatus.waiting &&
+      _serverStatus != OrderStatus.offered &&
+      _serverStatus != OrderStatus.noDriver;
 
   @override
   void initState() {
@@ -133,6 +184,8 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
         scheduledAt: _schedule,
         driver: _driver?.id,
         argo: _price,
+        pickupPoint: _pickupPoint,
+        destPoint: _destPoint,
       );
       if (!mounted) return;
       if (order != null) {
@@ -191,7 +244,10 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
             return ChoiceChip(
               label: Text(s.label),
               selected: sel,
-              onSelected: (_) => setState(() => _service = s),
+              onSelected: (_) {
+                setState(() => _service = s);
+                _refreshEstimate();
+              },
               selectedColor: AirColors.navy,
               labelStyle: TextStyle(color: sel ? Colors.white : AirColors.text, fontWeight: FontWeight.w600),
               backgroundColor: Colors.white,
@@ -200,19 +256,74 @@ class _CustomerOrderFlowState extends State<CustomerOrderFlow> {
           }).toList()),
           const SizedBox(height: 16),
           _field('Waktu Jemput', '${fTime(_schedule)} • ${fDate(_schedule)}', Icons.event, onTap: () async {
+            final now = DateTime.now();
+            final d = await showDatePicker(
+              context: context,
+              initialDate: _schedule.isBefore(now) ? now : _schedule,
+              firstDate: DateTime(now.year, now.month, now.day),
+              lastDate: DateTime(now.year + 1, now.month, now.day),
+            );
+            if (d == null || !mounted) return;
             final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_schedule));
-            if (t != null) setState(() => _schedule = DateTime(_schedule.year, _schedule.month, _schedule.day, t.hour, t.minute));
+            if (t != null) setState(() => _schedule = DateTime(d.year, d.month, d.day, t.hour, t.minute));
           }),
           const SizedBox(height: 12),
-          TextField(controller: _pickup, decoration: const InputDecoration(labelText: 'Lokasi Jemput', prefixIcon: Icon(Icons.trip_origin, color: AirColors.green))),
+          TextField(
+            controller: _pickup,
+            decoration: InputDecoration(
+              labelText: 'Lokasi Jemput',
+              prefixIcon: const Icon(Icons.trip_origin, color: AirColors.green),
+              suffixIcon: IconButton(
+                icon: Icon(Icons.map, color: _pickupPoint != null ? AirColors.green : AirColors.navy),
+                tooltip: 'Pilih di peta',
+                onPressed: () => _pickOnMap(isPickup: true),
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
-          TextField(controller: _dest, decoration: const InputDecoration(labelText: 'Tujuan', prefixIcon: Icon(Icons.location_on, color: AirColors.red))),
+          TextField(
+            controller: _dest,
+            decoration: InputDecoration(
+              labelText: 'Tujuan',
+              prefixIcon: const Icon(Icons.location_on, color: AirColors.red),
+              suffixIcon: IconButton(
+                icon: Icon(Icons.map, color: _destPoint != null ? AirColors.green : AirColors.navy),
+                tooltip: 'Pilih di peta',
+                onPressed: () => _pickOnMap(isPickup: false),
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
           SectionCard(
-            child: Row(children: [
-              const Text('Estimasi Harga', style: TextStyle(color: AirColors.textDim)),
-              const Spacer(),
-              Text(rp(_price), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AirColors.navy)),
+            child: Column(children: [
+              Row(children: [
+                const Text('Estimasi Harga', style: TextStyle(color: AirColors.textDim)),
+                const Spacer(),
+                if (_estimating)
+                  const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4, color: AirColors.navy))
+                else
+                  Text(rp(_price), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AirColors.navy)),
+              ]),
+              if (_estimate != null) ...[
+                const Divider(height: 18),
+                Row(children: [
+                  const Icon(Icons.route, size: 15, color: AirColors.textDim),
+                  const SizedBox(width: 6),
+                  Text('${_estimate!.distanceKm.toStringAsFixed(1)} km • ${_estimate!.etaMinutes} mnt',
+                      style: const TextStyle(color: AirColors.textDim, fontSize: 12.5)),
+                  const Spacer(),
+                  Text(_estimate!.source == 'osrm' ? 'rute peta' : 'estimasi', style: const TextStyle(color: AirColors.textDim, fontSize: 11)),
+                ]),
+              ] else
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Row(children: [
+                    Icon(Icons.info_outline, size: 14, color: AirColors.textDim),
+                    SizedBox(width: 6),
+                    Expanded(child: Text('Pilih titik jemput & tujuan di peta untuk tarif berbasis jarak.',
+                        style: TextStyle(color: AirColors.textDim, fontSize: 11.5))),
+                  ]),
+                ),
             ]),
           ),
         ]),

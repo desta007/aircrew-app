@@ -33,21 +33,26 @@ void main() {
     );
     final code = created.order.id;
     expect(code, startsWith('ORD-'));
-    expect(created.order.status, OrderStatus.waiting);
+    // Phase 2: creation immediately dispatches the order — it is now OFFERED to
+    // the nearest eligible driver (highest-rated in the area when no coords),
+    // which is DRV-001 (rating 4.92) for the Pusat area.
+    expect(created.order.status, OrderStatus.offered);
     expect(created.invoice, isNull, reason: 'invoice is generated later on completion');
 
-    // New waiting order shows up in the customer's Riwayat Order (new method).
+    // New order shows up in the customer's Riwayat Order (new method).
     final history = await api.customerOrders();
     expect(history.any((o) => o.id == code), isTrue,
         reason: 'customerOrders() must include the freshly created order');
 
-    // ---- 2. Driver sees it in their area and accepts ----
+    // ---- 2. The driver it was offered to sees it and accepts ----
     final driver = await api.loginMitra('drv-001@aircrew.id', 'demo1234');
     expect(driver.id, 'DRV-001');
     expect(driver.area, 'Pusat');
 
     final incoming = await api.mitraIncoming();
-    expect(incoming, isNotNull, reason: 'a waiting order exists in the driver area');
+    expect(incoming, isNotNull, reason: 'the order was dispatched (offered) to DRV-001');
+    expect(incoming!.id, code);
+    expect(incoming.status, OrderStatus.offered);
 
     final accepted = await api.acceptOrder(code);
     expect(accepted.status, OrderStatus.accepted);

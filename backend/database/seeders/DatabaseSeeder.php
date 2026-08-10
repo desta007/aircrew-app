@@ -21,17 +21,22 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         // ---- Areas (6 closed areas) ----
+        // center_lat/lng anchor the map default; fare rule: argo = base + km*per_km + min*per_min (>= min_fare).
         $areaDefs = [
-            ['name' => 'Utara',     'color' => '#2E63C4'],
-            ['name' => 'Timur',     'color' => '#17A54A'],
-            ['name' => 'Pusat',     'color' => '#E07B1A'],
-            ['name' => 'Barat',     'color' => '#7A3EC4'],
-            ['name' => 'Selatan',   'color' => '#E11B22'],
-            ['name' => 'Tangerang', 'color' => '#C2185B'],
+            ['name' => 'Utara',     'color' => '#2E63C4', 'lat' => -6.1385, 'lng' => 106.8637, 'base' => 10000, 'km' => 4000, 'min' => 500, 'minfare' => 20000],
+            ['name' => 'Timur',     'color' => '#17A54A', 'lat' => -6.2250, 'lng' => 106.9004, 'base' => 10000, 'km' => 4000, 'min' => 500, 'minfare' => 20000],
+            ['name' => 'Pusat',     'color' => '#E07B1A', 'lat' => -6.1865, 'lng' => 106.8340, 'base' => 12000, 'km' => 4500, 'min' => 600, 'minfare' => 25000],
+            ['name' => 'Barat',     'color' => '#7A3EC4', 'lat' => -6.1683, 'lng' => 106.7588, 'base' => 10000, 'km' => 4000, 'min' => 500, 'minfare' => 20000],
+            ['name' => 'Selatan',   'color' => '#E11B22', 'lat' => -6.2615, 'lng' => 106.8106, 'base' => 12000, 'km' => 4500, 'min' => 600, 'minfare' => 25000],
+            ['name' => 'Tangerang', 'color' => '#C2185B', 'lat' => -6.1783, 'lng' => 106.6319, 'base' => 10000, 'km' => 4000, 'min' => 500, 'minfare' => 20000],
         ];
         $areas = [];
         foreach ($areaDefs as $a) {
-            $areas[$a['name']] = Area::create($a);
+            $areas[$a['name']] = Area::create([
+                'name' => $a['name'], 'color' => $a['color'],
+                'center_lat' => $a['lat'], 'center_lng' => $a['lng'],
+                'base_fare' => $a['base'], 'per_km' => $a['km'], 'per_min' => $a['min'], 'min_fare' => $a['minfare'],
+            ]);
         }
 
         // ---- Drivers (mitra) ----
@@ -45,13 +50,19 @@ class DatabaseSeeder extends Seeder
         ];
         $drivers = [];
         foreach ($driverDefs as $d) {
+            $area = $areas[$d['area']];
+            // Seed a starting position jittered ~1km around the area centre.
+            $jitter = fn () => (mt_rand(-90, 90) / 10000);
             $drivers[$d['code']] = Driver::create([
-                'code' => $d['code'], 'name' => $d['name'], 'area_id' => $areas[$d['area']]->id,
+                'code' => $d['code'], 'name' => $d['name'], 'area_id' => $area->id,
                 'email' => strtolower($d['code']).'@aircrew.id',
                 'password' => Hash::make(self::DEMO_PASSWORD),
                 'rating' => $d['rating'], 'status' => $d['status'], 'online' => $d['online'],
                 'balance' => $d['balance'], 'held_balance' => $d['held'], 'trips' => $d['trips'],
                 'vehicle_name' => $d['v'], 'vehicle_plate' => $d['p'],
+                'current_lat' => $area->center_lat + $jitter(),
+                'current_lng' => $area->center_lng + $jitter(),
+                'location_updated_at' => now(),
             ]);
         }
 

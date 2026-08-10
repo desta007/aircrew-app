@@ -15,7 +15,8 @@ extension ServiceTypeX on ServiceType {
 
 /// Lifecycle of an order, following the Mitra Driver flow (12 steps).
 enum OrderStatus {
-  waiting, // order masuk, menunggu driver terima
+  waiting, // order masuk, menunggu didispatch
+  offered, // ditawarkan ke driver tertentu (Phase 2 dispatch)
   accepted, // driver terima order
   toPickup, // menuju lokasi jemput
   arrivedPickup, // tiba di lokasi jemput
@@ -23,11 +24,13 @@ enum OrderStatus {
   arrivedDest, // tiba di tujuan
   completed, // konfirmasi selesai + biaya final
   cancelled,
+  noDriver, // tidak ada driver tersedia (dispatch habis)
 }
 
 extension OrderStatusX on OrderStatus {
   String get label => switch (this) {
         OrderStatus.waiting => 'Menunggu',
+        OrderStatus.offered => 'Mencari Driver',
         OrderStatus.accepted => 'Diterima',
         OrderStatus.toPickup => 'Menuju Jemput',
         OrderStatus.arrivedPickup => 'Tiba di Lokasi',
@@ -35,11 +38,14 @@ extension OrderStatusX on OrderStatus {
         OrderStatus.arrivedDest => 'Tiba di Tujuan',
         OrderStatus.completed => 'Selesai',
         OrderStatus.cancelled => 'Dibatalkan',
+        OrderStatus.noDriver => 'Tidak Ada Driver',
       };
   Color get color => switch (this) {
         OrderStatus.completed => const Color(0xFF17A54A),
         OrderStatus.cancelled => const Color(0xFFE11B22),
+        OrderStatus.noDriver => const Color(0xFFE11B22),
         OrderStatus.waiting => const Color(0xFFE07B1A),
+        OrderStatus.offered => const Color(0xFFE07B1A),
         _ => const Color(0xFF1E5BE6),
       };
 }
@@ -60,10 +66,44 @@ String serviceToApi(ServiceType s) => switch (s) {
       ServiceType.rental8 => 'rental8',
     };
 
-OrderStatus statusFromApi(String v) => OrderStatus.values.firstWhere(
-      (s) => s.name == v,
-      orElse: () => OrderStatus.waiting,
-    );
+OrderStatus statusFromApi(String v) => switch (v) {
+      'no_driver' => OrderStatus.noDriver,
+      _ => OrderStatus.values.firstWhere((s) => s.name == v, orElse: () => OrderStatus.waiting),
+    };
+
+/// A geographic point (WGS84). Kept dependency-free so models don't require the
+/// `latlong2` package; convert at the map-widget boundary.
+class LatLngPoint {
+  final double lat;
+  final double lng;
+  const LatLngPoint(this.lat, this.lng);
+
+  static LatLngPoint? tryFrom(dynamic lat, dynamic lng) {
+    if (lat is num && lng is num) return LatLngPoint(lat.toDouble(), lng.toDouble());
+    return null;
+  }
+}
+
+/// Distance/ETA/fare quote returned by `POST /customer/orders/estimate`.
+class FareEstimate {
+  final double distanceKm;
+  final int etaMinutes;
+  final double fareEstimate;
+  final String source; // 'osrm' | 'haversine'
+  const FareEstimate({
+    required this.distanceKm,
+    required this.etaMinutes,
+    required this.fareEstimate,
+    this.source = 'osrm',
+  });
+
+  factory FareEstimate.fromJson(Map<String, dynamic> j) => FareEstimate(
+        distanceKm: (j['distance_km'] as num?)?.toDouble() ?? 0,
+        etaMinutes: (j['eta_minutes'] as num?)?.toInt() ?? 0,
+        fareEstimate: (j['fare_estimate'] as num?)?.toDouble() ?? 0,
+        source: (j['source'] ?? 'osrm') as String,
+      );
+}
 
 class Vehicle {
   final String name; // e.g. Innova Reborn
@@ -81,6 +121,7 @@ class Driver {
   final double rating;
   final Vehicle vehicle;
   bool online;
+  LatLngPoint? location; // live GPS position (null until reported)
   Driver({
     required this.id,
     required this.name,
@@ -88,16 +129,21 @@ class Driver {
     required this.rating,
     required this.vehicle,
     this.online = true,
+    this.location,
   });
 
-  factory Driver.fromJson(Map<String, dynamic> j) => Driver(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        area: (j['area'] ?? '-') as String,
-        rating: (j['rating'] as num).toDouble(),
-        vehicle: Vehicle.fromJson((j['vehicle'] ?? {}) as Map<String, dynamic>),
-        online: (j['online'] ?? false) as bool,
-      );
+  factory Driver.fromJson(Map<String, dynamic> j) {
+    final loc = j['location'];
+    return Driver(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      area: (j['area'] ?? '-') as String,
+      rating: (j['rating'] as num).toDouble(),
+      vehicle: Vehicle.fromJson((j['vehicle'] ?? {}) as Map<String, dynamic>),
+      online: (j['online'] ?? false) as bool,
+      location: loc is Map<String, dynamic> ? LatLngPoint.tryFrom(loc['lat'], loc['lng']) : null,
+    );
+  }
 }
 
 class Customer {
@@ -154,9 +200,12 @@ class Order {
   final ServiceType service;
   final String pickup;
   final String destination;
+  final LatLngPoint? pickupPoint;
+  final LatLngPoint? destPoint;
   final DateTime scheduledAt;
   final double distanceKm;
   final int etaMinutes;
+  final double fareEstimate;
   final String note;
   OrderStatus status;
   OrderCharges charges;
@@ -173,9 +222,12 @@ class Order {
     required this.service,
     required this.pickup,
     required this.destination,
+    this.pickupPoint,
+    this.destPoint,
     required this.scheduledAt,
     required this.distanceKm,
     required this.etaMinutes,
+    this.fareEstimate = 0,
     this.note = '',
     this.status = OrderStatus.waiting,
     OrderCharges? charges,
@@ -196,9 +248,12 @@ class Order {
       service: serviceFromApi((j['service'] ?? 'scheduled') as String),
       pickup: (j['pickup'] ?? '') as String,
       destination: (j['destination'] ?? '') as String,
+      pickupPoint: LatLngPoint.tryFrom(j['pickup_lat'], j['pickup_lng']),
+      destPoint: LatLngPoint.tryFrom(j['dest_lat'], j['dest_lng']),
       scheduledAt: DateTime.tryParse((j['scheduled_at'] ?? '') as String) ?? DateTime.now(),
       distanceKm: (j['distance_km'] as num?)?.toDouble() ?? 0,
       etaMinutes: (j['eta_minutes'] as num?)?.toInt() ?? 0,
+      fareEstimate: (j['fare_estimate'] as num?)?.toDouble() ?? 0,
       note: (j['note'] ?? '') as String,
       status: statusFromApi((j['status'] ?? 'waiting') as String),
       charges: OrderCharges.fromJson((j['charges'] ?? {}) as Map<String, dynamic>),

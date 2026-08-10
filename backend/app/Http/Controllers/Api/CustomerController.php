@@ -5,13 +5,23 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Driver;
+use App\Models\DeviceToken;
 use App\Models\Invoice;
 use App\Models\Order;
+use App\Services\DispatchService;
+use App\Services\FareService;
+use App\Services\RoutingService;
 use App\Support\Present;
 use Illuminate\Http\Request;
 
 class CustomerController extends Controller
 {
+    public function __construct(
+        private RoutingService $routing,
+        private FareService $fare,
+        private DispatchService $dispatch,
+    ) {}
+
     private function customer(Request $request): Customer
     {
         $user = $request->user();
@@ -40,6 +50,36 @@ class CustomerController extends Controller
     }
 
     /**
+     * Quote distance, ETA and estimated fare (argo) for a pickup→destination pair
+     * before the customer confirms the order (Phase 1). Manual charges
+     * (tol/parkir/lainnya) are added later by the driver on completion.
+     */
+    public function estimate(Request $request)
+    {
+        $data = $request->validate([
+            'service' => 'required|in:scheduled,rental3,rental5,rental8',
+            'pickup_lat' => 'required|numeric|between:-90,90',
+            'pickup_lng' => 'required|numeric|between:-180,180',
+            'dest_lat' => 'required|numeric|between:-90,90',
+            'dest_lng' => 'required|numeric|between:-180,180',
+        ]);
+
+        $c = $this->customer($request);
+        $route = $this->routing->route(
+            (float) $data['pickup_lat'], (float) $data['pickup_lng'],
+            (float) $data['dest_lat'], (float) $data['dest_lng'],
+        );
+        $argo = $this->fare->estimate($c->area, $data['service'], $route['distance_km'], $route['eta_minutes']);
+
+        return response()->json([
+            'distance_km' => $route['distance_km'],
+            'eta_minutes' => $route['eta_minutes'],
+            'fare_estimate' => $argo,
+            'source' => $route['source'],
+        ]);
+    }
+
+    /**
      * Create an order from the customer app.
      *
      * Normal flow: the order is created with status `waiting` so it appears in
@@ -58,11 +98,18 @@ class CustomerController extends Controller
             'destination' => 'required|string',
             'scheduled_at' => 'required|date',
             'driver' => 'nullable|string',
-            'argo' => 'required|integer|min:0',
+            // argo is optional when coordinates are supplied — it is computed from
+            // distance; still accepted directly for the legacy/offline flow.
+            'argo' => 'nullable|integer|min:0',
             'tol' => 'nullable|integer|min:0',
             'parkir' => 'nullable|integer|min:0',
             'lainnya' => 'nullable|integer|min:0',
             'completed' => 'nullable|boolean',
+            'pickup_lat' => 'nullable|numeric|between:-90,90',
+            'pickup_lng' => 'nullable|numeric|between:-180,180',
+            'dest_lat' => 'nullable|numeric|between:-90,90',
+            'dest_lng' => 'nullable|numeric|between:-180,180',
+            'payment_mode' => 'nullable|in:invoice,prepaid',
         ]);
 
         $c = $this->customer($request);
@@ -73,24 +120,56 @@ class CustomerController extends Controller
         $completed = $data['completed'] ?? false;
         $scheduledAt = \Illuminate\Support\Carbon::parse($data['scheduled_at']);
 
+        // Route + fare: compute from real coordinates when provided, otherwise
+        // fall back to the caller-supplied argo (legacy flow) and static defaults.
+        $hasCoords = isset($data['pickup_lat'], $data['pickup_lng'], $data['dest_lat'], $data['dest_lng']);
+        if ($hasCoords) {
+            $route = $this->routing->route(
+                (float) $data['pickup_lat'], (float) $data['pickup_lng'],
+                (float) $data['dest_lat'], (float) $data['dest_lng'],
+            );
+            $distanceKm = $route['distance_km'];
+            $etaMinutes = $route['eta_minutes'];
+            $fareEstimate = $this->fare->estimate($c->area, $data['service'], $distanceKm, $etaMinutes);
+        } else {
+            $distanceKm = 12;
+            $etaMinutes = 25;
+            $fareEstimate = $data['argo'] ?? 0;
+        }
+        $argo = $data['argo'] ?? $fareEstimate;
+
         $order = Order::create([
             'code' => 'ORD-'.now()->format('ymd').'-'.random_int(10000, 99999),
             'customer_id' => $c->id,
-            'driver_id' => $driver?->id,
+            // For the dispatch flow the driver is assigned on accept, not up front;
+            // the customer's pick is passed to the dispatcher as a preferred driver.
+            'driver_id' => $completed ? $driver?->id : null,
             'area_id' => $c->area_id,
             'service' => $data['service'],
             'pickup' => $data['pickup'],
             'destination' => $data['destination'],
+            'pickup_lat' => $data['pickup_lat'] ?? null,
+            'pickup_lng' => $data['pickup_lng'] ?? null,
+            'dest_lat' => $data['dest_lat'] ?? null,
+            'dest_lng' => $data['dest_lng'] ?? null,
             'scheduled_at' => $data['scheduled_at'],
-            'distance_km' => 12,
-            'eta_minutes' => 25,
+            'distance_km' => $distanceKm,
+            'eta_minutes' => $etaMinutes,
             'status' => $completed ? 'completed' : 'waiting',
-            'argo' => $data['argo'],
+            'payment_mode' => $data['payment_mode'] ?? 'invoice',
+            'fare_estimate' => $fareEstimate,
+            'argo' => $argo,
             'tol' => $data['tol'] ?? 0,
             'parkir' => $data['parkir'] ?? 0,
             'lainnya' => $data['lainnya'] ?? 0,
             'completed_at' => $completed ? now() : null,
         ]);
+
+        // Kick off dispatch: offer the new order to the nearest eligible driver
+        // (preferring the one the customer picked, if any).
+        if (! $completed) {
+            $order = $this->dispatch->dispatch($order, $driver?->id);
+        }
 
         $invoice = null;
         if ($completed) {
@@ -146,6 +225,21 @@ class CustomerController extends Controller
         $order->crew_rating = $data['rating'];
         $order->crew_feedback = $data['feedback'] ?? null;
         $order->save();
+        return response()->json(['ok' => true]);
+    }
+
+    /** Register/refresh an FCM device token for push notifications (Phase 2). */
+    public function registerDeviceToken(Request $request)
+    {
+        $data = $request->validate([
+            'token' => 'required|string',
+            'platform' => 'nullable|string',
+        ]);
+        $c = $this->customer($request);
+        DeviceToken::updateOrCreate(
+            ['token' => $data['token']],
+            ['customer_id' => $c->id, 'driver_id' => null, 'platform' => $data['platform'] ?? null],
+        );
         return response()->json(['ok' => true]);
     }
 }

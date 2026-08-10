@@ -32,6 +32,11 @@ class Present
                 'name' => $d->vehicle_name,
                 'plate' => $d->vehicle_plate,
             ],
+            'location' => ($d->current_lat !== null && $d->current_lng !== null) ? [
+                'lat' => (float) $d->current_lat,
+                'lng' => (float) $d->current_lng,
+                'updated_at' => optional($d->location_updated_at)->toIso8601String(),
+            ] : null,
         ];
     }
 
@@ -52,11 +57,18 @@ class Present
             'service' => $o->service,
             'pickup' => $o->pickup,
             'destination' => $o->destination,
+            'pickup_lat' => $o->pickup_lat !== null ? (float) $o->pickup_lat : null,
+            'pickup_lng' => $o->pickup_lng !== null ? (float) $o->pickup_lng : null,
+            'dest_lat' => $o->dest_lat !== null ? (float) $o->dest_lat : null,
+            'dest_lng' => $o->dest_lng !== null ? (float) $o->dest_lng : null,
             'scheduled_at' => optional($o->scheduled_at)->toIso8601String(),
             'distance_km' => (float) $o->distance_km,
             'eta_minutes' => (int) $o->eta_minutes,
             'note' => $o->note,
             'status' => $o->status,
+            'payment_mode' => $o->payment_mode,
+            'fare_estimate' => (int) $o->fare_estimate,
+            'offer_expires_at' => optional($o->offer_expires_at)->toIso8601String(),
             'area' => $o->area?->name,
             'charges' => [
                 'argo' => (int) $o->argo,

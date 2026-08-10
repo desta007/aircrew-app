@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    // Routing provider for distance/ETA (Phase 1). Defaults to the public OSRM
+    // demo server; point OSRM_URL at a self-hosted instance for production.
+    'osrm' => [
+        'url' => env('OSRM_URL', 'https://router.project-osrm.org'),
+    ],
+
 ];

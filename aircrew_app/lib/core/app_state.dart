@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'api.dart';
+import 'location_service.dart';
 import 'models.dart';
 import 'seed.dart';
 
@@ -25,6 +26,25 @@ class AppState extends ChangeNotifier {
   }
 
   final ApiClient api = ApiClient.instance;
+
+  /// Reports the driver's live GPS to the API while online (Phase 1).
+  late final DriverLocationReporter _locationReporter = DriverLocationReporter(api);
+
+  /// Quote distance/ETA/fare for a map-selected pickup→destination before the
+  /// customer confirms the order. Returns null when offline or on error.
+  Future<FareEstimate?> estimateFare({
+    required ServiceType service,
+    required LatLngPoint pickup,
+    required LatLngPoint destination,
+  }) async {
+    if (!apiConnected) return null;
+    try {
+      return await api.estimateFare(service: service, pickup: pickup, destination: destination);
+    } catch (e) {
+      debugPrint('estimateFare: $e');
+      return null;
+    }
+  }
 
   /// The active driver identity shown across the Mitra app: the account signed
   /// in against the API when available, otherwise the bundled demo driver. Using
@@ -129,6 +149,7 @@ class AppState extends ChangeNotifier {
 
   /// Revoke the token and reset to a clean (seed) state.
   Future<void> logout() async {
+    _locationReporter.stop();
     await api.logout();
     loggedInCustomer = null;
     loggedInDriver = null;
@@ -195,6 +216,8 @@ class AppState extends ChangeNotifier {
     required DateTime scheduledAt,
     String? driver,
     required double argo,
+    LatLngPoint? pickupPoint,
+    LatLngPoint? destPoint,
   }) async {
     if (!apiConnected) return null;
     try {
@@ -206,6 +229,8 @@ class AppState extends ChangeNotifier {
         driver: driver,
         argo: argo,
         completed: false,
+        pickupPoint: pickupPoint,
+        destPoint: destPoint,
       );
       // Refresh history so the new (waiting) order shows in Riwayat Order.
       refreshCustomerOrders();
@@ -289,6 +314,12 @@ class AppState extends ChangeNotifier {
     _online = v;
     notifyListeners();
     if (apiConnected) api.setOnline(v).catchError((_) {});
+    // Stream live GPS to the backend only while online (Phase 1).
+    if (v) {
+      _locationReporter.start();
+    } else {
+      _locationReporter.stop();
+    }
   }
 
   // ---- Active order ----

@@ -7,7 +7,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Area extends Model
 {
-    protected $fillable = ['name', 'color'];
+    protected $fillable = [
+        'name', 'color', 'center_lat', 'center_lng',
+        'base_fare', 'per_km', 'per_min', 'min_fare',
+    ];
 
     public function drivers(): HasMany
     {

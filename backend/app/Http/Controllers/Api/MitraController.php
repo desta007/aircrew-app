@@ -7,11 +7,18 @@ use App\Models\Driver;
 use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\WalletTransaction;
+use App\Services\DispatchService;
+use App\Services\RealtimeService;
 use App\Support\Present;
 use Illuminate\Http\Request;
 
 class MitraController extends Controller
 {
+    public function __construct(
+        private DispatchService $dispatch,
+        private RealtimeService $realtime,
+    ) {}
+
     /** Resolve the authenticated driver from the Sanctum token. */
     private function driver(Request $request): Driver
     {
@@ -43,18 +50,43 @@ class MitraController extends Controller
     }
 
     /**
-     * The latest order waiting for a driver in this driver's area
-     * (closed-area system). Returns null when there is nothing to accept, so the
-     * app can show an "menunggu order" empty state instead of a stale demo order.
+     * Store the driver's live GPS position (Phase 1). Called periodically by the
+     * driver app while online/on-trip; consumed later for nearest-driver dispatch
+     * and live tracking on the customer app.
+     */
+    public function updateLocation(Request $request)
+    {
+        $data = $request->validate([
+            'lat' => 'required|numeric|between:-90,90',
+            'lng' => 'required|numeric|between:-180,180',
+        ]);
+        $d = $this->driver($request);
+        $d->current_lat = $data['lat'];
+        $d->current_lng = $data['lng'];
+        $d->location_updated_at = now();
+        $d->save();
+
+        // Stream the position to the customer of this driver's active trip (if any).
+        $activeCode = Order::whereIn('status', ['accepted', 'toPickup', 'arrivedPickup', 'onTrip', 'arrivedDest'])
+            ->where('driver_id', $d->id)
+            ->value('code');
+        if ($activeCode) {
+            $this->realtime->driverLocationUpdated($activeCode, (float) $data['lat'], (float) $data['lng']);
+        }
+
+        return response()->json(['ok' => true, 'location_updated_at' => $d->location_updated_at->toIso8601String()]);
+    }
+
+    /**
+     * The order currently offered to THIS driver by the dispatcher (Phase 2),
+     * not yet expired. Returns null when nothing is offered so the app shows a
+     * "menunggu order" empty state. Expires stale offers first (best-effort).
      */
     public function incoming(Request $request)
     {
         $d = $this->driver($request);
-        $order = Order::with('customer', 'driver', 'area')
-            ->where('status', 'waiting')
-            ->where('area_id', $d->area_id)
-            ->latest('id')
-            ->first();
+        $this->dispatch->expireStale();
+        $order = $this->dispatch->currentOfferFor($d);
 
         return response()->json(['order' => $order ? Present::order($order) : null]);
     }
@@ -62,18 +94,31 @@ class MitraController extends Controller
     public function accept(Request $request, string $code)
     {
         $d = $this->driver($request);
-        $order = Order::with('customer', 'area')->where('code', $code)->firstOrFail();
-        $order->driver_id = $d->id;
-        $order->status = 'accepted';
-        $order->save();
-        return response()->json(['order' => Present::order($order->load('driver'))]);
+        $order = Order::where('code', $code)->firstOrFail();
+        $accepted = $this->dispatch->accept($order, $d);
+        return response()->json(['order' => Present::order($accepted)]);
     }
 
     public function reject(Request $request, string $code)
     {
+        $d = $this->driver($request);
         $order = Order::where('code', $code)->firstOrFail();
-        $order->status = 'cancelled';
-        $order->save();
+        $this->dispatch->decline($order, $d);
+        return response()->json(['ok' => true]);
+    }
+
+    /** Register/refresh an FCM device token for push notifications (Phase 2). */
+    public function registerDeviceToken(Request $request)
+    {
+        $data = $request->validate([
+            'token' => 'required|string',
+            'platform' => 'nullable|string',
+        ]);
+        $d = $this->driver($request);
+        \App\Models\DeviceToken::updateOrCreate(
+            ['token' => $data['token']],
+            ['driver_id' => $d->id, 'customer_id' => null, 'platform' => $data['platform'] ?? null],
+        );
         return response()->json(['ok' => true]);
     }
 
@@ -83,6 +128,7 @@ class MitraController extends Controller
         $order = Order::with('customer', 'driver', 'area')->where('code', $code)->firstOrFail();
         $order->status = $request->string('status');
         $order->save();
+        $this->realtime->orderStatusChanged($order);
         return response()->json(['order' => Present::order($order)]);
     }
 
@@ -140,6 +186,8 @@ class MitraController extends Controller
                 'due_date' => now()->addDays(14)->toDateString(),
             ]);
         }
+
+        $this->realtime->orderStatusChanged($order);
 
         return response()->json(['order' => Present::order($order)]);
     }

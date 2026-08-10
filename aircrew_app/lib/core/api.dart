@@ -130,6 +130,18 @@ class ApiClient {
   }
 
   Future<void> setOnline(bool online) => _post('/mitra/online', {'online': online}, query: _driverQ);
+
+  /// Report the driver's live GPS position (Phase 1). Called periodically by the
+  /// driver app while online/on-trip.
+  Future<void> updateLocation(double lat, double lng) =>
+      _post('/mitra/location', {'lat': lat, 'lng': lng}, query: _driverQ);
+
+  /// Register/refresh this device's FCM push token (Phase 2). [asDriver] selects
+  /// the driver vs customer endpoint (they share one Flutter codebase).
+  Future<void> registerDeviceToken({required bool asDriver, required String token, String platform = 'android'}) =>
+      _post('${asDriver ? '/mitra' : '/customer'}/device-token', {'token': token, 'platform': platform},
+          query: asDriver ? _driverQ : _custQ);
+
   Future<Order> acceptOrder(String code) async =>
       Order.fromJson((await _post('/mitra/orders/$code/accept', {}, query: _driverQ))['order'] as Map<String, dynamic>);
   Future<void> rejectOrder(String code) => _post('/mitra/orders/$code/reject', {}, query: _driverQ);
@@ -160,6 +172,24 @@ class ApiClient {
   }
 
   // ---------- Customer ----------
+
+  /// Quote distance/ETA/fare for a pickup→destination pair before the customer
+  /// confirms the order (Phase 1).
+  Future<FareEstimate> estimateFare({
+    required ServiceType service,
+    required LatLngPoint pickup,
+    required LatLngPoint destination,
+  }) async {
+    final j = await _post('/customer/orders/estimate', {
+      'service': serviceToApi(service),
+      'pickup_lat': pickup.lat,
+      'pickup_lng': pickup.lng,
+      'dest_lat': destination.lat,
+      'dest_lng': destination.lng,
+    }, query: _custQ);
+    return FareEstimate.fromJson(j);
+  }
+
   Future<List<Invoice>> customerInvoices() async {
     final j = await _get('/customer/invoices', query: _custQ);
     return (j['invoices'] as List).map((i) => Invoice.fromJson(i as Map<String, dynamic>)).toList();
@@ -195,6 +225,9 @@ class ApiClient {
     double parkir = 0,
     double lainnya = 0,
     bool completed = false,
+    LatLngPoint? pickupPoint,
+    LatLngPoint? destPoint,
+    String paymentMode = 'invoice',
   }) async {
     final j = await _post('/customer/orders', {
       'service': serviceToApi(service),
@@ -207,6 +240,11 @@ class ApiClient {
       'parkir': parkir.toInt(),
       'lainnya': lainnya.toInt(),
       'completed': completed,
+      'payment_mode': paymentMode,
+      if (pickupPoint != null) 'pickup_lat': pickupPoint.lat,
+      if (pickupPoint != null) 'pickup_lng': pickupPoint.lng,
+      if (destPoint != null) 'dest_lat': destPoint.lat,
+      if (destPoint != null) 'dest_lng': destPoint.lng,
     }, query: _custQ);
     return (
       order: Order.fromJson(j['order'] as Map<String, dynamic>),
