@@ -362,12 +362,18 @@ class Payment {
   final double amount;
   final PaymentMethod method;
   final DateTime at;
+  final String status; // pending | paid | failed
+  final Map<String, dynamic>? instructions; // gateway QR string / VA number / url
   const Payment({
     required this.ref,
     required this.amount,
     required this.method,
     required this.at,
+    this.status = 'paid',
+    this.instructions,
   });
+
+  bool get isPaid => status == 'paid';
 
   factory Payment.fromJson(Map<String, dynamic> j) => Payment(
         ref: j['ref'] as String,
@@ -378,6 +384,8 @@ class Payment {
           _ => PaymentMethod.qris,
         },
         at: DateTime.tryParse((j['at'] ?? '') as String) ?? DateTime.now(),
+        status: (j['status'] ?? 'paid') as String,
+        instructions: (j['instructions'] as Map?)?.cast<String, dynamic>(),
       );
 }
 

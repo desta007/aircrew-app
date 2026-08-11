@@ -6,11 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Driver;
 use App\Models\WalletTransaction;
 use App\Models\Withdrawal;
+use App\Services\DisbursementService;
 use App\Support\Present;
 use Illuminate\Http\Request;
 
 class WithdrawalController extends Controller
 {
+    public function __construct(private DisbursementService $disbursement) {}
+
     private function driver(Request $request): Driver
     {
         $user = $request->user();
@@ -66,6 +69,9 @@ class WithdrawalController extends Controller
             'label' => 'Withdraw '.strtoupper($data['method']),
             'occurred_at' => now(),
         ]);
+
+        // Submit the payout to the disbursement provider (sets gateway/ref/status).
+        $this->disbursement->disburse($w);
 
         return response()->json(['withdrawal' => Present::withdrawal($w->load('driver'))], 201);
     }

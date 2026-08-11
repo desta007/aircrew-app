@@ -121,6 +121,9 @@ class Present
             'ref' => $p->ref,
             'amount' => (int) $p->amount,
             'method' => $p->method,
+            'status' => $p->status ?? 'paid',
+            'gateway' => $p->gateway,
+            'instructions' => $p->instructions,
             'at' => optional($p->paid_at)->toIso8601String(),
         ];
     }

@@ -9,6 +9,7 @@ class Withdrawal extends Model
 {
     protected $fillable = [
         'ref', 'driver_id', 'nominal', 'fee', 'speed', 'method', 'account', 'status', 'requested_at',
+        'gateway', 'gateway_ref',
     ];
 
     protected $casts = ['requested_at' => 'datetime'];

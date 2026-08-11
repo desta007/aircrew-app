@@ -5,12 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Invoice;
-use App\Models\Payment;
+use App\Services\Payment\PaymentService;
 use App\Support\Present;
 use Illuminate\Http\Request;
 
 class InvoiceController extends Controller
 {
+    public function __construct(private PaymentService $payments) {}
+
     private function customer(Request $request): Customer
     {
         $user = $request->user();
@@ -41,7 +43,12 @@ class InvoiceController extends Controller
         return response()->json(['invoice' => Present::invoice($inv)]);
     }
 
-    /** Record a (possibly partial) payment against an invoice. */
+    /**
+     * Start a (possibly partial) payment against an invoice via the payment
+     * gateway. Returns the payment (with instructions — QRIS string / VA number /
+     * redirect URL) and the invoice. Instant methods / the fake gateway confirm
+     * immediately; otherwise the payment stays `pending` until the webhook.
+     */
     public function pay(Request $request, string $code)
     {
         $data = $request->validate([
@@ -49,19 +56,13 @@ class InvoiceController extends Controller
             'method' => 'required|in:qris,va,card',
         ]);
 
-        $inv = Invoice::with('order', 'payments')->where('code', $code)->firstOrFail();
-        if ($data['amount'] > $inv->remaining) {
-            return response()->json(['message' => 'Nominal melebihi sisa tagihan.'], 422);
-        }
+        $c = $this->customer($request);
+        $inv = Invoice::with('order', 'payments')
+            ->where('code', $code)
+            ->where('customer_id', $c->id)
+            ->firstOrFail();
 
-        $prefix = strtoupper($data['method']);
-        $payment = Payment::create([
-            'ref' => $prefix.now()->format('ymdHis').random_int(10, 99),
-            'invoice_id' => $inv->id,
-            'amount' => $data['amount'],
-            'method' => $data['method'],
-            'paid_at' => now(),
-        ]);
+        $payment = $this->payments->initiate($inv, $data['amount'], $data['method']);
 
         $inv->load('order.customer', 'order.driver', 'payments');
         return response()->json([

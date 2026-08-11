@@ -23,6 +23,25 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Default app name (used by the combined build); flavors override it.
+        manifestPlaceholders["appName"] = "AirCrew"
+    }
+
+    // Phase 3 — two installable apps from one codebase (Flutter flavors).
+    // Build: flutter build apk -t lib/main_driver.dart   --flavor driver
+    //        flutter build apk -t lib/main_customer.dart --flavor customer
+    flavorDimensions += "app"
+    productFlavors {
+        create("driver") {
+            dimension = "app"
+            applicationIdSuffix = ".driver"
+            manifestPlaceholders["appName"] = "AirCrew Driver"
+        }
+        create("customer") {
+            dimension = "app"
+            applicationIdSuffix = ".customer"
+            manifestPlaceholders["appName"] = "AirCrew Crew"
+        }
     }
 
     buildTypes {

@@ -8,23 +8,43 @@ import 'core/widgets.dart';
 import 'mitra/mitra_login.dart';
 import 'customer/customer_login.dart';
 
-void main() async {
+/// Which app this build is: the combined demo (role selector) or one of the two
+/// production flavors that boot straight into their login (Phase 3 — 2 APKs).
+enum AppFlavor { both, driver, customer }
+
+Future<void> bootstrap(AppFlavor flavor) async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('id_ID');
-  runApp(const AirCrewApp());
+  runApp(AirCrewApp(flavor: flavor));
 }
 
+void main() => bootstrap(AppFlavor.both);
+
 class AirCrewApp extends StatelessWidget {
-  const AirCrewApp({super.key});
+  final AppFlavor flavor;
+  const AirCrewApp({super.key, this.flavor = AppFlavor.both});
+
+  String get _title => switch (flavor) {
+        AppFlavor.driver => 'AirCrew Driver',
+        AppFlavor.customer => 'AirCrew Crew',
+        AppFlavor.both => 'AirCrew',
+      };
+
+  Widget get _home => switch (flavor) {
+        AppFlavor.driver => const MitraLogin(),
+        AppFlavor.customer => const CustomerLogin(),
+        AppFlavor.both => const RoleSelector(),
+      };
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => AppState()..pingApi(),
       child: MaterialApp(
-        title: 'AirCrew',
+        title: _title,
         debugShowCheckedModeBanner: false,
         theme: AirTheme.light(),
-        home: const RoleSelector(),
+        home: _home,
       ),
     );
   }

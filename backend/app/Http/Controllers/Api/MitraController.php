@@ -124,9 +124,12 @@ class MitraController extends Controller
 
     public function advance(Request $request, string $code)
     {
-        $request->validate(['status' => 'required|string']);
+        // Restrict to the real trip states — no free-form status writes (hardening).
+        $data = $request->validate([
+            'status' => 'required|in:toPickup,arrivedPickup,onTrip,arrivedDest,cancelled',
+        ]);
         $order = Order::with('customer', 'driver', 'area')->where('code', $code)->firstOrFail();
-        $order->status = $request->string('status');
+        $order->status = $data['status'];
         $order->save();
         $this->realtime->orderStatusChanged($order);
         return response()->json(['order' => Present::order($order)]);
@@ -228,13 +231,17 @@ class MitraController extends Controller
 
     private function pendapatanSummary(Driver $d): array
     {
+        // Real figures derived from the driver's income wallet transactions
+        // (hardening — previously hardcoded demo constants). Fresh query per line.
+        $income = fn () => WalletTransaction::where('driver_id', $d->id)->where('type', 'income');
+
         return [
             'saldo_tersedia' => (int) $d->balance,
             'saldo_tertahan' => (int) $d->held_balance,
-            'total_pendapatan' => (int) $d->walletTransactions()->where('type', 'income')->sum('amount') + 5625000,
-            'hari_ini' => 320000,
-            'minggu_ini' => 2450000,
-            'bulan_ini' => 5750000,
+            'total_pendapatan' => (int) $income()->sum('amount'),
+            'hari_ini' => (int) $income()->whereDate('occurred_at', now()->toDateString())->sum('amount'),
+            'minggu_ini' => (int) $income()->where('occurred_at', '>=', now()->startOfWeek())->sum('amount'),
+            'bulan_ini' => (int) $income()->where('occurred_at', '>=', now()->startOfMonth())->sum('amount'),
         ];
     }
 }

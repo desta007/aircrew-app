@@ -25,7 +25,9 @@ class Invoice extends Model
 
     public function getPaidAttribute(): int
     {
-        return (int) $this->payments->sum('amount');
+        // Only confirmed (paid) payments reduce the outstanding balance; pending
+        // gateway charges do not count until the webhook confirms them.
+        return (int) $this->payments->where('status', 'paid')->sum('amount');
     }
 
     public function getRemainingAttribute(): int
